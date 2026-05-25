@@ -131,7 +131,85 @@ body {
   border-bottom: 1px solid var(--rule);
 }
 .count-num { font-family: 'Boldonse', serif; font-size: 1.4rem; }
-.count-word { font-size: 0.9rem; color: var(--muted); }
+.count-word { font-size: 0.9rem; color: var(--muted); flex: 1; }
+
+.add-btn {
+  font-family: inherit; font-size: 0.85rem; font-weight: 500;
+  background: transparent; border: 1px solid var(--rule); color: var(--ink-soft);
+  padding: 0.45rem 0.9rem;
+  cursor: pointer; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  transition: all 0.15s ease;
+}
+.add-btn:hover { border-color: var(--ink); color: var(--ink); background: var(--bg-soft); }
+
+/* Unrated state */
+.row-grade.g-unrated {
+  background: transparent;
+  color: var(--muted);
+  border: 1px dashed var(--rule);
+  font-size: 1.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.05em;
+}
+.row.unrated .row-blurb { color: var(--muted); }
+.unrated-cta {
+  font-size: 0.85rem;
+  color: var(--ink);
+  font-weight: 500;
+  margin-top: 0.4rem;
+}
+.added-by {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+
+/* Google autocomplete suggestions — override their defaults */
+.pac-container {
+  font-family: 'Geist', sans-serif !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--rule) !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.12) !important;
+  margin-top: 4px !important;
+  background: var(--bg) !important;
+  z-index: 10000 !important;
+}
+.pac-item {
+  padding: 0.6rem 0.8rem !important;
+  font-size: 0.9rem !important;
+  border-top: 1px solid var(--rule) !important;
+  cursor: pointer !important;
+}
+.pac-item:first-child { border-top: none !important; }
+.pac-item:hover { background: var(--bg-soft) !important; }
+.pac-icon { display: none !important; }
+.pac-item-query { font-family: 'Boldonse', serif !important; color: var(--ink) !important; font-size: 0.95rem !important; }
+.pac-matched { color: var(--ink) !important; }
+.hdpi.pac-logo:after { display: none !important; } /* Hide the Google logo footer in dropdown */
+
+.add-form-pick {
+  padding: 0.9rem;
+  background: var(--bg-soft);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.88rem;
+}
+.add-form-pick strong { font-family: 'Boldonse', serif; font-weight: 400; font-size: 1.05rem; display: block; margin-bottom: 0.2rem; }
+.add-form-pick .pick-addr { color: var(--ink-soft); font-size: 0.85rem; }
+.add-form-pick .pick-clear {
+  margin-top: 0.5rem; font-size: 0.78rem;
+  background: none; border: none; color: var(--ink-soft);
+  cursor: pointer; padding: 0; text-decoration: underline;
+}
+.add-form-note {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin: 0.8rem 0;
+}
 
 /* List */
 .list { margin-bottom: 6rem; }
@@ -429,6 +507,33 @@ if (firebaseConfig.apiKey) {
   }
 }
 
+// ============================================================
+//  GOOGLE PLACES CONFIG
+//  To enable Google Maps autocomplete when adding new restaurants:
+//  1. Go to https://console.cloud.google.com/
+//  2. Create or pick a project. Enable billing (Google gives $200/mo free).
+//  3. APIs & Services > Library > enable "Places API (New)" and "Maps JavaScript API"
+//  4. APIs & Services > Credentials > Create credentials > API key
+//  5. Restrict the key: HTTP referrers, add your GitHub Pages URL
+//  6. Paste the key below.
+//  If you leave this empty, the "Add restaurant" form falls back to
+//  manual entry (no autocomplete, no verification).
+// ============================================================
+const googleMapsApiKey = ""; // <-- paste your Google Maps API key here
+
+window.__google = { ready: false, apiKey: googleMapsApiKey };
+if (googleMapsApiKey) {
+  const script = document.createElement("script");
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(googleMapsApiKey)}&libraries=places&v=weekly&loading=async&callback=__googleMapsLoaded`;
+  script.async = true;
+  script.defer = true;
+  window.__googleMapsLoaded = () => {
+    window.__google.ready = true;
+    window.dispatchEvent(new Event("google-ready"));
+  };
+  document.head.appendChild(script);
+}
+
 // Tell the app to boot once firebase status is decided
 window.dispatchEvent(new Event("firebase-ready"));
 </script>
@@ -539,7 +644,7 @@ function scoreToGrade(score) {
 }
 
 function gradeClass(grade) {
-  if (grade === "—") return "g-na";
+  if (grade === "—" || grade === "Unrated") return "g-unrated";
   if (grade.startsWith("A")) return "g-a";
   if (grade.startsWith("B")) return "g-b";
   if (grade.startsWith("C")) return "g-c";
@@ -549,11 +654,13 @@ function gradeClass(grade) {
 // ============================================================
 // STORAGE LAYER — Firebase if configured, localStorage fallback
 // ============================================================
-const STORAGE_KEY = "ledger_user_ratings_v1";
+const REVIEWS_KEY = "ledger_user_ratings_v1";
+const RESTAURANTS_KEY = "ledger_user_restaurants_v1";
 
 const storage = {
   mode: "loading",  // "firebase" | "local" | "loading"
-  cache: {},        // { restaurantId: [rating, ...] }
+  reviewsCache: {},      // { restaurantId: [rating, ...] }
+  restaurantsCache: [],  // [restaurant, ...]
   subscribers: [],
 
   subscribe(fn) {
@@ -562,15 +669,17 @@ const storage = {
   },
 
   notify() {
-    this.subscribers.forEach(fn => fn(this.cache));
+    this.subscribers.forEach(fn => fn({ reviews: this.reviewsCache, restaurants: this.restaurantsCache }));
   },
 
   async init() {
     if (window.__firebase) {
       this.mode = "firebase";
       const { db, collection, onSnapshot, query, orderBy } = window.__firebase;
-      const q = query(collection(db, "reviews"), orderBy("createdAt", "asc"));
-      onSnapshot(q, (snapshot) => {
+
+      // Reviews stream
+      const qReviews = query(collection(db, "reviews"), orderBy("createdAt", "asc"));
+      onSnapshot(qReviews, (snapshot) => {
         const next = {};
         snapshot.forEach(doc => {
           const data = doc.data();
@@ -578,13 +687,24 @@ const storage = {
           if (!next[rid]) next[rid] = [];
           next[rid].push(data);
         });
-        this.cache = next;
+        this.reviewsCache = next;
         this.notify();
       }, (err) => {
-        console.error("Firestore listener error", err);
+        console.error("Firestore reviews listener error", err);
         this.mode = "local";
         this.loadLocal();
         this.notify();
+      });
+
+      // Restaurants stream
+      const qRestaurants = query(collection(db, "restaurants"), orderBy("createdAt", "asc"));
+      onSnapshot(qRestaurants, (snapshot) => {
+        const next = [];
+        snapshot.forEach(doc => next.push({ ...doc.data(), id: doc.id }));
+        this.restaurantsCache = next;
+        this.notify();
+      }, (err) => {
+        console.error("Firestore restaurants listener error", err);
       });
     } else {
       this.mode = "local";
@@ -595,10 +715,16 @@ const storage = {
 
   loadLocal() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      this.cache = raw ? JSON.parse(raw) : {};
+      const rawReviews = localStorage.getItem(REVIEWS_KEY);
+      this.reviewsCache = rawReviews ? JSON.parse(rawReviews) : {};
     } catch (e) {
-      this.cache = {};
+      this.reviewsCache = {};
+    }
+    try {
+      const rawRestaurants = localStorage.getItem(RESTAURANTS_KEY);
+      this.restaurantsCache = rawRestaurants ? JSON.parse(rawRestaurants) : [];
+    } catch (e) {
+      this.restaurantsCache = [];
     }
   },
 
@@ -616,14 +742,40 @@ const storage = {
         throw e;
       }
     } else {
-      if (!this.cache[restaurantId]) this.cache[restaurantId] = [];
-      this.cache[restaurantId].push(rating);
+      if (!this.reviewsCache[restaurantId]) this.reviewsCache[restaurantId] = [];
+      this.reviewsCache[restaurantId].push(rating);
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.cache));
+        localStorage.setItem(REVIEWS_KEY, JSON.stringify(this.reviewsCache));
       } catch (e) {
         console.error("localStorage write failed", e);
       }
       this.notify();
+    }
+  },
+
+  async addRestaurant(restaurant) {
+    if (this.mode === "firebase") {
+      const { db, collection, addDoc, serverTimestamp } = window.__firebase;
+      try {
+        const docRef = await addDoc(collection(db, "restaurants"), {
+          ...restaurant,
+          createdAt: serverTimestamp(),
+        });
+        return docRef.id;
+      } catch (e) {
+        console.error("Firestore write failed", e);
+        throw e;
+      }
+    } else {
+      const id = "u_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      this.restaurantsCache.push({ ...restaurant, id });
+      try {
+        localStorage.setItem(RESTAURANTS_KEY, JSON.stringify(this.restaurantsCache));
+      } catch (e) {
+        console.error("localStorage write failed", e);
+      }
+      this.notify();
+      return id;
     }
   },
 };
@@ -634,9 +786,10 @@ const storage = {
 const state = {
   query: "",
   neighborhood: "All",
-  selected: null,   // restaurant being viewed in detail
-  rating: null,     // restaurant being rated
-  userRatings: {},  // from storage layer
+  selected: null,        // restaurant being viewed in detail
+  rating: null,          // restaurant being rated
+  userRatings: {},       // from storage layer
+  userRestaurants: [],   // user-added restaurants from storage layer
 };
 
 function setState(patch) {
@@ -644,8 +797,9 @@ function setState(patch) {
   render();
 }
 
-storage.subscribe((userRatings) => {
-  state.userRatings = userRatings;
+storage.subscribe(({ reviews, restaurants }) => {
+  state.userRatings = reviews;
+  state.userRestaurants = restaurants;
   render();
 });
 
@@ -671,10 +825,16 @@ function escapeHtml(s) {
 // RENDER
 // ============================================================
 function getMerged() {
-  return SEED.map(r => ({
+  const seedMerged = SEED.map(r => ({
     ...r,
     ratings: [...r.ratings, ...(state.userRatings[r.id] || [])],
   }));
+  const userAdded = (state.userRestaurants || []).map(r => ({
+    ...r,
+    ratings: state.userRatings[r.id] || [],
+    isUserAdded: true,
+  }));
+  return [...seedMerged, ...userAdded];
 }
 
 function getFiltered() {
@@ -683,7 +843,12 @@ function getFiltered() {
     .filter(r => state.query.trim() === "" ? true :
       (r.name + r.cuisine + r.neighborhood).toLowerCase().includes(state.query.toLowerCase()))
     .map(r => ({ ...r, score: avgScore(r.ratings) }))
-    .sort((a, b) => (b.score?.overall ?? -1) - (a.score?.overall ?? -1));
+    .sort((a, b) => {
+      // Unrated go to the bottom
+      const aScore = a.score?.overall ?? -Infinity;
+      const bScore = b.score?.overall ?? -Infinity;
+      return bScore - aScore;
+    });
 }
 
 function renderSpark(perMetric, grade) {
@@ -697,18 +862,23 @@ function renderSpark(perMetric, grade) {
 }
 
 function renderRow(r, i) {
-  const grade = scoreToGrade(r.score?.overall);
   const count = r.ratings.length;
-  return `<article class="row" data-restaurant="${r.id}" style="animation-delay: ${i * 35}ms">
+  const isUnrated = count === 0;
+  const grade = isUnrated ? "—" : scoreToGrade(r.score?.overall);
+  const blurb = r.blurb || (r.address ? r.address : "");
+  return `<article class="row ${isUnrated ? "unrated" : ""}" data-restaurant="${r.id}" style="animation-delay: ${i * 35}ms">
     <div class="row-grade ${gradeClass(grade)}">${grade}</div>
     <div class="row-body">
       <h2 class="row-name">${escapeHtml(r.name)}</h2>
-      <p class="row-meta">${escapeHtml(r.cuisine)} · ${escapeHtml(r.neighborhood)}</p>
-      <p class="row-blurb">${escapeHtml(r.blurb)}</p>
+      <p class="row-meta">${escapeHtml(r.cuisine || "Restaurant")} · ${escapeHtml(r.neighborhood)}</p>
+      ${isUnrated
+        ? `<p class="unrated-cta">Be the first to rate this restaurant →</p>
+           ${r.addedBy ? `<p class="added-by">Added by @${escapeHtml(r.addedBy)}</p>` : ""}`
+        : `<p class="row-blurb">${escapeHtml(blurb)}</p>`}
     </div>
     <div class="row-spark">
-      ${renderSpark(r.score?.perMetric, grade)}
-      <span class="row-count">${count} ${count === 1 ? "review" : "reviews"}</span>
+      ${isUnrated ? "" : renderSpark(r.score?.perMetric, grade)}
+      <span class="row-count">${isUnrated ? "Unrated" : `${count} ${count === 1 ? "review" : "reviews"}`}</span>
     </div>
     <button class="row-arrow" aria-label="Open">${Icons.arrow()}</button>
   </article>`;
@@ -733,11 +903,11 @@ function render() {
     <header class="masthead">
       <div class="brand">Ledger</div>
       <h1 class="hero">
-        We grade<br/>
-        <span class="hero-grade">A+</span> the<br/>
-        honest <span class="hero-strike">ones.</span>
+        A public record<br/>
+        of restaurant<br/>
+        sustainability.
       </h1>
-      <p class="hero-sub">A public record of how restaurants handle the small things. Reviews from people who actually ate there. Bay Area, for now.</p>
+      <p class="hero-sub">Kept by the people who eat there. Bay Area, for now.</p>
     </header>
 
     <div class="toolbar">
@@ -754,6 +924,7 @@ function render() {
     <div class="count-line">
       <span class="count-num">${String(filtered.length).padStart(2, "0")}</span>
       <span class="count-word">${filtered.length === 1 ? "restaurant on record" : "restaurants on record"}</span>
+      <button class="add-btn" id="add-restaurant-btn">${Icons.plus()} Add restaurant</button>
     </div>
 
     <main class="list">
@@ -798,6 +969,9 @@ function render() {
       openDetail(r);
     });
   });
+
+  const addBtn = document.getElementById("add-restaurant-btn");
+  if (addBtn) addBtn.addEventListener("click", openAddRestaurant);
 }
 
 // Avoid full re-render on every keystroke
@@ -826,7 +1000,8 @@ function renderListOnly() {
 // ============================================================
 function openDetail(restaurant) {
   const score = avgScore(restaurant.ratings);
-  const grade = scoreToGrade(score?.overall);
+  const isUnrated = restaurant.ratings.length === 0;
+  const grade = isUnrated ? "—" : scoreToGrade(score?.overall);
 
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -836,49 +1011,57 @@ function openDetail(restaurant) {
       <div class="detail-head">
         <div class="detail-head-text">
           <h2 class="detail-name">${escapeHtml(restaurant.name)}</h2>
-          <p class="detail-meta">${escapeHtml(restaurant.cuisine)} · ${escapeHtml(restaurant.neighborhood)} · ${escapeHtml(restaurant.address)}</p>
-          <p class="detail-blurb">${escapeHtml(restaurant.blurb)}</p>
+          <p class="detail-meta">${escapeHtml(restaurant.cuisine || "Restaurant")} · ${escapeHtml(restaurant.neighborhood)}${restaurant.address ? " · " + escapeHtml(restaurant.address) : ""}</p>
+          ${restaurant.blurb ? `<p class="detail-blurb">${escapeHtml(restaurant.blurb)}</p>` : ""}
         </div>
         <div class="detail-grade ${gradeClass(grade)}">${grade}</div>
       </div>
-      <div class="metric-table">
-        ${METRICS.map(m => {
-          const v = score?.perMetric?.[m.id];
-          const g = scoreToGrade(v);
-          return `<div class="metric-row">
-            <div class="metric-row-text">
-              <span class="metric-row-name">${escapeHtml(m.label)}</span>
-              <span class="metric-row-help">${escapeHtml(m.help)}</span>
-            </div>
-            <div class="metric-row-bar">
-              <div class="metric-row-fill ${gradeClass(g)}" style="width: ${v ? (v / 5) * 100 : 0}%"></div>
-            </div>
-            <div class="metric-row-grade ${gradeClass(g)}">${g}</div>
-          </div>`;
-        }).join("")}
-      </div>
-      <div class="reviews-section">
-        <div class="reviews-head">
-          <h3>${restaurant.ratings.length} ${restaurant.ratings.length === 1 ? "review" : "reviews"}</h3>
-          <button class="btn-primary" data-action="add-review">${Icons.plus()} Add yours</button>
+      ${isUnrated ? `
+        <div style="text-align: center; padding: 3rem 1rem; border-top: 1px solid var(--rule); margin-bottom: 2rem;">
+          <p style="font-family: 'Boldonse', serif; font-size: 1.4rem; margin: 0 0 0.5rem;">No reviews yet.</p>
+          <p style="color: var(--ink-soft); margin: 0 0 1.5rem;">Be the first to file a review and set the grade.</p>
+          <button class="btn-primary" data-action="add-review">${Icons.plus()} File the first review</button>
         </div>
-        <ul class="reviews">
-          ${restaurant.ratings.slice().reverse().map(r => {
-            const sum = METRICS.map(m => r[m.id]).filter(v => typeof v === "number");
-            const avg = sum.reduce((a,b)=>a+b,0) / (sum.length || 1);
-            const g = scoreToGrade(avg);
-            return `<li class="review">
-              <div class="review-head">
-                <span class="review-user">@${escapeHtml(r.user || "anonymous")}</span>
-                <span class="review-sep">·</span>
-                <span class="review-date">${escapeHtml(r.date || "—")}</span>
-                <span class="review-grade ${gradeClass(g)}">${g}</span>
+      ` : `
+        <div class="metric-table">
+          ${METRICS.map(m => {
+            const v = score?.perMetric?.[m.id];
+            const g = scoreToGrade(v);
+            return `<div class="metric-row">
+              <div class="metric-row-text">
+                <span class="metric-row-name">${escapeHtml(m.label)}</span>
+                <span class="metric-row-help">${escapeHtml(m.help)}</span>
               </div>
-              ${r.note ? `<p class="review-note">${escapeHtml(r.note)}</p>` : ""}
-            </li>`;
+              <div class="metric-row-bar">
+                <div class="metric-row-fill ${gradeClass(g)}" style="width: ${v ? (v / 5) * 100 : 0}%"></div>
+              </div>
+              <div class="metric-row-grade ${gradeClass(g)}">${g}</div>
+            </div>`;
           }).join("")}
-        </ul>
-      </div>
+        </div>
+        <div class="reviews-section">
+          <div class="reviews-head">
+            <h3>${restaurant.ratings.length} ${restaurant.ratings.length === 1 ? "review" : "reviews"}</h3>
+            <button class="btn-primary" data-action="add-review">${Icons.plus()} Add yours</button>
+          </div>
+          <ul class="reviews">
+            ${restaurant.ratings.slice().reverse().map(r => {
+              const sum = METRICS.map(m => r[m.id]).filter(v => typeof v === "number");
+              const avg = sum.reduce((a,b)=>a+b,0) / (sum.length || 1);
+              const g = scoreToGrade(avg);
+              return `<li class="review">
+                <div class="review-head">
+                  <span class="review-user">@${escapeHtml(r.user || "anonymous")}</span>
+                  <span class="review-sep">·</span>
+                  <span class="review-date">${escapeHtml(r.date || "—")}</span>
+                  <span class="review-grade ${gradeClass(g)}">${g}</span>
+                </div>
+                ${r.note ? `<p class="review-note">${escapeHtml(r.note)}</p>` : ""}
+              </li>`;
+            }).join("")}
+          </ul>
+        </div>
+      `}
     </div>
   `;
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
@@ -892,6 +1075,207 @@ function openDetail(restaurant) {
 
 function closeModal() {
   document.querySelectorAll(".modal-overlay").forEach(o => o.remove());
+}
+
+// ============================================================
+// ADD RESTAURANT MODAL
+// ============================================================
+function inferNeighborhood(addressComponents) {
+  if (!addressComponents) return "";
+  // Try to pick a neighborhood from Google's address components
+  const knownHoods = NEIGHBORHOODS.slice(1).map(h => h.toLowerCase());
+  for (const c of addressComponents) {
+    const longName = (c.long_name || "").toLowerCase();
+    const match = knownHoods.find(h => longName.includes(h) || h.includes(longName));
+    if (match) {
+      return NEIGHBORHOODS.find(n => n.toLowerCase() === match);
+    }
+    if (c.types && c.types.some(t => ["neighborhood", "sublocality", "locality"].includes(t))) {
+      // Capitalize-case
+      const formatted = c.long_name;
+      const knownMatch = NEIGHBORHOODS.find(n => n.toLowerCase() === formatted.toLowerCase());
+      if (knownMatch) return knownMatch;
+    }
+  }
+  return "";
+}
+
+function openAddRestaurant() {
+  let picked = null;     // { name, address, lat, lng, placeId, neighborhood }
+  let manualName = "";
+  let manualNeighborhood = NEIGHBORHOODS[1];
+  let manualCuisine = "";
+  let submitting = false;
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+
+  function html() {
+    const googleReady = window.__google && window.__google.ready;
+    return `
+      <div class="modal" onclick="event.stopPropagation()">
+        <button class="modal-close" data-action="close">${Icons.x(18)}</button>
+        <h2 class="detail-name" style="margin-bottom: 0">Add a restaurant</h2>
+        <p class="detail-meta" style="margin-bottom: 2rem">
+          ${googleReady
+            ? "Search Google Maps. Only places that exist on Maps can be added — keeps the ledger honest."
+            : "Manual entry mode. Configure a Google Maps API key in index.html to enable verified Maps search."}
+        </p>
+
+        ${picked ? `
+          <div class="add-form-pick">
+            <strong>${escapeHtml(picked.name)}</strong>
+            <span class="pick-addr">${escapeHtml(picked.address)}</span>
+            <button class="pick-clear" data-action="clear-pick">Change selection</button>
+          </div>
+        ` : googleReady ? `
+          <div class="field">
+            <input id="places-input" type="text" placeholder="Search a restaurant on Google Maps" autocomplete="off" />
+          </div>
+          <p class="add-form-note">Type a restaurant name. Suggestions come from Google Maps.</p>
+        ` : `
+          <div class="field">
+            <input id="manual-name" type="text" placeholder="Restaurant name" value="${escapeHtml(manualName)}" />
+          </div>
+          <div class="field">
+            <input id="manual-cuisine" type="text" placeholder="Cuisine (e.g. Italian, Cafe)" value="${escapeHtml(manualCuisine)}" />
+          </div>
+          <div class="field">
+            <select id="manual-hood" style="width: 100%; font-family: inherit; font-size: 0.95rem; padding: 0.8rem 0; border: none; border-bottom: 1px solid var(--rule); background: transparent; color: var(--ink); outline: none;">
+              ${NEIGHBORHOODS.slice(1).map(n => `<option value="${escapeHtml(n)}" ${n === manualNeighborhood ? "selected" : ""}>${escapeHtml(n)}</option>`).join("")}
+            </select>
+          </div>
+        `}
+
+        ${picked ? `
+          <div class="field">
+            <select id="picked-hood" style="width: 100%; font-family: inherit; font-size: 0.95rem; padding: 0.8rem 0; border: none; border-bottom: 1px solid var(--rule); background: transparent; color: var(--ink); outline: none;">
+              ${NEIGHBORHOODS.slice(1).map(n => `<option value="${escapeHtml(n)}" ${n === picked.neighborhood ? "selected" : ""}>${escapeHtml(n)}</option>`).join("")}
+            </select>
+            <p class="add-form-note">Confirm or adjust the neighborhood.</p>
+          </div>
+          <div class="field">
+            <input id="picked-cuisine" type="text" placeholder="Cuisine (e.g. Italian, Cafe)" value="${escapeHtml(picked.cuisine || "")}" />
+          </div>
+        ` : ""}
+
+        <div class="rate-foot">
+          <button class="btn-ghost" data-action="close">Cancel</button>
+          <button class="btn-primary" data-action="submit" ${submitting ? "disabled" : ""}>${submitting ? "Adding..." : "Add to ledger"}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function rerender() {
+    overlay.innerHTML = html();
+    wire();
+  }
+
+  function wire() {
+    overlay.querySelectorAll('[data-action="close"]').forEach(b => b.addEventListener("click", closeModal));
+    const clearBtn = overlay.querySelector('[data-action="clear-pick"]');
+    if (clearBtn) clearBtn.addEventListener("click", () => { picked = null; rerender(); });
+
+    // Wire Google Places Autocomplete on the input, if available
+    const placesInput = overlay.querySelector("#places-input");
+    if (placesInput && window.__google && window.__google.ready && window.google?.maps?.places) {
+      try {
+        // Bias to Bay Area
+        const bayAreaBounds = new google.maps.LatLngBounds(
+          new google.maps.LatLng(37.0, -122.6),
+          new google.maps.LatLng(38.2, -121.7)
+        );
+        const ac = new google.maps.places.Autocomplete(placesInput, {
+          bounds: bayAreaBounds,
+          strictBounds: false,
+          types: ["restaurant", "cafe", "bakery", "bar", "food"],
+          fields: ["name", "formatted_address", "geometry", "place_id", "address_components", "types"],
+        });
+        ac.addListener("place_changed", () => {
+          const place = ac.getPlace();
+          if (!place || !place.geometry) return;
+          // Crude cuisine guess from types
+          const cuisineMap = {
+            bakery: "Bakery", cafe: "Cafe", bar: "Bar",
+            meal_takeaway: "Takeout", meal_delivery: "Delivery",
+          };
+          let cuisine = "";
+          for (const t of (place.types || [])) {
+            if (cuisineMap[t]) { cuisine = cuisineMap[t]; break; }
+          }
+          picked = {
+            name: place.name,
+            address: place.formatted_address,
+            lat: place.geometry.location.lat(),
+            lng: place.geometry.location.lng(),
+            placeId: place.place_id,
+            neighborhood: inferNeighborhood(place.address_components) || NEIGHBORHOODS[1],
+            cuisine,
+          };
+          rerender();
+        });
+        // Make sure the dropdown is above our modal
+        setTimeout(() => {
+          document.querySelectorAll(".pac-container").forEach(el => { el.style.zIndex = "10000"; });
+        }, 100);
+      } catch (e) {
+        console.error("Places autocomplete failed", e);
+      }
+    }
+
+    overlay.querySelector('[data-action="submit"]').addEventListener("click", async () => {
+      if (submitting) return;
+
+      let restaurant;
+      if (picked) {
+        const hoodEl = overlay.querySelector("#picked-hood");
+        const cuisineEl = overlay.querySelector("#picked-cuisine");
+        restaurant = {
+          name: picked.name,
+          address: picked.address,
+          neighborhood: hoodEl ? hoodEl.value : picked.neighborhood,
+          cuisine: cuisineEl ? cuisineEl.value.trim() || "Restaurant" : "Restaurant",
+          lat: picked.lat,
+          lng: picked.lng,
+          placeId: picked.placeId,
+          source: "google_places",
+          blurb: "",
+        };
+      } else {
+        const nameEl = overlay.querySelector("#manual-name");
+        const cuisineEl = overlay.querySelector("#manual-cuisine");
+        const hoodEl = overlay.querySelector("#manual-hood");
+        if (!nameEl || !nameEl.value.trim()) {
+          alert("Please enter a restaurant name.");
+          return;
+        }
+        restaurant = {
+          name: nameEl.value.trim(),
+          cuisine: (cuisineEl?.value || "").trim() || "Restaurant",
+          neighborhood: hoodEl?.value || NEIGHBORHOODS[1],
+          address: "",
+          source: "manual",
+          blurb: "",
+        };
+      }
+
+      submitting = true;
+      rerender();
+      try {
+        await storage.addRestaurant(restaurant);
+        closeModal();
+      } catch (e) {
+        submitting = false;
+        alert("Could not add the restaurant. Please try again.");
+        rerender();
+      }
+    });
+  }
+
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
+  rerender();
+  document.body.appendChild(overlay);
 }
 
 // ============================================================
@@ -983,6 +1367,11 @@ function boot() {
   storage.init();
   render();
 }
+
+// Re-render when Google Maps finishes loading (so any open modal can use it)
+window.addEventListener("google-ready", () => {
+  // No-op for the main render; openAddRestaurant reads window.__google.ready each time
+});
 
 // Wait briefly for firebase init script to run (it's a module, slightly async)
 if (window.__firebase !== undefined) {
