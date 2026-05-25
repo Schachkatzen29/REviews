@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ledger — How restaurants actually handle the small things</title>
+<meta name="description" content="A public record of restaurant sustainability, kept by the people eating there. Bay Area." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Boldonse&family=Geist:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #faf8f3;
+  --bg-soft: #f0ece1;
+  --ink: #14140f;
+  --ink-soft: #5c5a52;
+  --muted: #a8a497;
+  --rule: #e2dccd;
+  --g-a-bg: #e8f0d4; --g-a-ink: #2d4a1a;
+  --g-b-bg: #fdf2cd; --g-b-ink: #6b5410;
+  --g-c-bg: #fde1c8; --g-c-ink: #8a3d12;
+  --g-f-bg: #f5c9c0; --g-f-ink: #6b1d12;
+  --g-na-bg: #ebe7da; --g-na-ink: #8a8676;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: 'Geist', sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.ledger {
+  min-height: 100vh;
+  padding: 3rem 2rem 0;
+  max-width: 1040px;
+  margin: 0 auto;
+}
+
+/* Status banner for Firebase config */
+.status-banner {
+  background: var(--g-b-bg);
+  color: var(--g-b-ink);
+  padding: 0.7rem 1rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  margin-bottom: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.status-banner.live { background: var(--g-a-bg); color: var(--g-a-ink); }
+.status-banner code { background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
+
+/* Masthead */
+.masthead { margin-bottom: 5rem; padding-top: 2rem; }
+.brand {
+  font-family: 'Boldonse', serif;
+  font-size: 1.1rem;
+  letter-spacing: 0.02em;
+  margin-bottom: 6rem;
+  display: inline-block;
+}
+.hero {
+  font-family: 'Boldonse', serif;
+  font-weight: 400;
+  font-size: clamp(3rem, 8.5vw, 6.4rem);
+  letter-spacing: -0.02em;
+  line-height: 0.98;
+  margin: 0 0 2rem;
+  max-width: 800px;
+}
+.hero-grade {
+  display: inline-block;
+  background: var(--g-a-bg);
+  color: var(--g-a-ink);
+  padding: 0.05em 0.25em;
+  border-radius: 0.1em;
+  transform: rotate(-2deg);
+  margin: 0 0.05em;
+  line-height: 0.95;
+}
+.hero-strike { position: relative; display: inline-block; }
+.hero-strike::after {
+  content: '';
+  position: absolute; left: -2%; right: -2%;
+  top: 52%; height: 0.1em;
+  background: var(--ink);
+  transform: rotate(-3deg);
+}
+.hero-sub {
+  font-size: 1.05rem;
+  color: var(--ink-soft);
+  margin: 0;
+  max-width: 520px;
+}
+
+/* Toolbar */
+.toolbar { display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 2rem; }
+.search {
+  display: flex; align-items: center; gap: 0.6rem;
+  border-bottom: 1px solid var(--rule);
+  padding: 0.7rem 0;
+  color: var(--ink-soft);
+  transition: border-color 0.2s ease;
+}
+.search:focus-within { border-color: var(--ink); }
+.search input {
+  flex: 1; border: none; background: transparent;
+  font-family: inherit; font-size: 1rem; color: var(--ink); outline: none;
+}
+.search input::placeholder { color: var(--muted); }
+.search-icon, .clear { display: flex; align-items: center; }
+.clear { background: none; border: none; cursor: pointer; color: var(--muted); padding: 2px; }
+.clear:hover { color: var(--ink); }
+.hood-row { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.hood {
+  font-family: inherit; font-size: 0.85rem;
+  background: transparent; border: none; color: var(--muted);
+  padding: 0.4rem 0.85rem;
+  cursor: pointer; border-radius: 999px;
+  transition: all 0.15s ease;
+}
+.hood:hover { color: var(--ink); background: var(--bg-soft); }
+.hood-active { background: var(--ink); color: var(--bg); }
+
+.count-line {
+  display: flex; align-items: baseline; gap: 0.75rem;
+  margin-bottom: 2rem; padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+.count-num { font-family: 'Boldonse', serif; font-size: 1.4rem; }
+.count-word { font-size: 0.9rem; color: var(--muted); }
+
+/* List */
+.list { margin-bottom: 6rem; }
+.empty {
+  font-size: 1rem; color: var(--muted);
+  text-align: center; padding: 4rem 0;
+}
+.row {
+  display: grid;
+  grid-template-columns: 110px 1fr auto 40px;
+  align-items: start;
+  gap: 1.75rem;
+  padding: 2.25rem 1rem;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+  margin: 0 -1rem;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+  animation: fadeUp 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.row:hover { background: var(--bg-soft); }
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.row-grade {
+  font-family: 'Boldonse', serif;
+  font-size: 3rem;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  text-align: center;
+  min-width: 90px;
+}
+.g-a { background: var(--g-a-bg); color: var(--g-a-ink); }
+.g-b { background: var(--g-b-bg); color: var(--g-b-ink); }
+.g-c { background: var(--g-c-bg); color: var(--g-c-ink); }
+.g-f { background: var(--g-f-bg); color: var(--g-f-ink); }
+.g-na { background: var(--g-na-bg); color: var(--g-na-ink); }
+
+.row-body { min-width: 0; padding-top: 0.3rem; }
+.row-name {
+  font-family: 'Boldonse', serif;
+  font-size: 1.6rem; letter-spacing: -0.015em;
+  margin: 0 0 0.4rem; line-height: 1.05;
+}
+.row-meta { font-size: 0.85rem; color: var(--muted); margin: 0 0 0.6rem; }
+.row-blurb {
+  font-size: 0.95rem; color: var(--ink-soft);
+  margin: 0; max-width: 460px;
+}
+.row-spark {
+  display: flex; flex-direction: column;
+  align-items: flex-end; gap: 0.5rem; padding-top: 0.8rem;
+}
+.spark { display: flex; gap: 4px; height: 32px; align-items: flex-end; }
+.spark-bar {
+  width: 6px; height: 100%;
+  background: var(--bg-soft); border-radius: 1px;
+  overflow: hidden; position: relative;
+}
+.spark-fill { position: absolute; bottom: 0; left: 0; right: 0; transition: height 0.4s ease; }
+.spark.g-a .spark-fill { background: var(--g-a-ink); }
+.spark.g-b .spark-fill { background: var(--g-b-ink); }
+.spark.g-c .spark-fill { background: var(--g-c-ink); }
+.spark.g-f .spark-fill { background: var(--g-f-ink); }
+.spark.g-na .spark-fill { background: var(--g-na-ink); }
+.row-count { font-size: 0.75rem; color: var(--muted); }
+.row-arrow {
+  background: none; border: none; cursor: pointer;
+  color: var(--muted); padding: 0.9rem 0 0;
+  display: flex; transition: all 0.15s ease;
+}
+.row:hover .row-arrow { color: var(--ink); transform: translate(2px, -2px); }
+
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(20, 20, 15, 0.5);
+  backdrop-filter: blur(6px);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 4rem 1.5rem;
+  z-index: 100; overflow-y: auto;
+  animation: overlayIn 0.2s ease;
+}
+@keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  background: var(--bg); border-radius: 10px;
+  padding: 3rem; max-width: 680px; width: 100%;
+  position: relative;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.2);
+  animation: modalIn 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.modal-close {
+  position: absolute; top: 1.25rem; right: 1.25rem;
+  background: none; border: none; cursor: pointer;
+  color: var(--muted); padding: 6px;
+  display: flex; border-radius: 50%;
+  transition: all 0.15s ease;
+}
+.modal-close:hover { color: var(--ink); background: var(--bg-soft); }
+
+.detail-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 2rem; padding-bottom: 2rem;
+  border-bottom: 1px solid var(--rule); margin-bottom: 2rem;
+}
+.detail-head-text { flex: 1; min-width: 0; }
+.detail-name {
+  font-family: 'Boldonse', serif;
+  font-size: 2.2rem; margin: 0 0 0.5rem;
+  letter-spacing: -0.02em; line-height: 1;
+}
+.detail-meta { font-size: 0.9rem; color: var(--muted); margin: 0 0 0.8rem; }
+.detail-blurb { font-size: 0.95rem; color: var(--ink-soft); margin: 0; max-width: 400px; }
+.detail-grade {
+  font-family: 'Boldonse', serif;
+  font-size: 4rem; line-height: 1;
+  letter-spacing: -0.03em;
+  padding: 0.5rem 0.75rem; border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.metric-table { display: flex; flex-direction: column; margin-bottom: 3rem; }
+.metric-row {
+  display: grid;
+  grid-template-columns: 1fr 160px 50px;
+  align-items: center; gap: 1.5rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.metric-row:last-child { border-bottom: none; }
+.metric-row-text { display: flex; flex-direction: column; gap: 0.2rem; }
+.metric-row-name { font-size: 0.95rem; font-weight: 500; }
+.metric-row-help { font-size: 0.78rem; color: var(--muted); }
+.metric-row-bar { background: var(--bg-soft); height: 6px; border-radius: 3px; overflow: hidden; }
+.metric-row-fill { height: 100%; transition: width 0.5s ease; }
+.metric-row-fill.g-a { background: var(--g-a-ink); }
+.metric-row-fill.g-b { background: var(--g-b-ink); }
+.metric-row-fill.g-c { background: var(--g-c-ink); }
+.metric-row-fill.g-f { background: var(--g-f-ink); }
+.metric-row-fill.g-na { background: var(--g-na-ink); }
+.metric-row-grade {
+  font-family: 'Boldonse', serif;
+  font-size: 1.1rem; text-align: center;
+  padding: 0.2rem 0.4rem; border-radius: 4px;
+}
+
+.reviews-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+.reviews-head h3 { font-family: 'Boldonse', serif; font-size: 1.3rem; font-weight: 400; margin: 0; }
+.reviews { list-style: none; padding: 0; margin: 0; }
+.review { padding: 1.25rem 0; border-bottom: 1px solid var(--rule); }
+.review:last-child { border-bottom: none; }
+.review-head {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.8rem; color: var(--muted); margin-bottom: 0.5rem;
+}
+.review-user { color: var(--ink-soft); font-weight: 500; }
+.review-sep { color: var(--rule); }
+.review-grade {
+  margin-left: auto;
+  font-family: 'Boldonse', serif;
+  font-size: 1rem;
+  padding: 0.15rem 0.4rem; border-radius: 4px;
+}
+.review-note { font-size: 0.98rem; line-height: 1.55; margin: 0; }
+
+/* Rate modal */
+.rate-grid { display: flex; flex-direction: column; margin-bottom: 1.5rem; }
+.rate-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center; gap: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.rate-row:last-child { border-bottom: none; }
+.rate-label { display: flex; flex-direction: column; gap: 0.15rem; }
+.rate-label > span:first-child { font-size: 0.95rem; font-weight: 500; }
+.rate-buttons { display: flex; gap: 6px; }
+.rate-btn {
+  width: 34px; height: 34px;
+  border: 1px solid var(--rule);
+  background: transparent; color: var(--ink-soft);
+  font-family: 'Boldonse', serif; font-size: 0.95rem;
+  cursor: pointer; border-radius: 50%;
+  transition: all 0.15s ease;
+}
+.rate-btn:hover { border-color: var(--ink-soft); color: var(--ink); }
+.rate-btn-active {
+  background: var(--ink); color: var(--bg);
+  border-color: var(--ink); transform: scale(1.05);
+}
+.field { margin-bottom: 0.8rem; }
+.field input, .field textarea {
+  width: 100%; font-family: inherit;
+  font-size: 0.95rem; padding: 0.8rem 0;
+  border: none; border-bottom: 1px solid var(--rule);
+  background: transparent; color: var(--ink); outline: none;
+  resize: vertical;
+}
+.field input::placeholder, .field textarea::placeholder { color: var(--muted); }
+.field input:focus, .field textarea:focus { border-color: var(--ink); }
+
+.rate-foot { display: flex; justify-content: flex-end; gap: 0.6rem; padding-top: 1.5rem; }
+.btn-ghost, .btn-primary {
+  font-family: inherit; font-size: 0.88rem; font-weight: 500;
+  cursor: pointer; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  transition: all 0.15s ease;
+  padding: 0.55rem 1.2rem;
+}
+.btn-ghost { background: transparent; border: 1px solid var(--rule); color: var(--ink-soft); }
+.btn-ghost:hover { border-color: var(--ink); color: var(--ink); }
+.btn-primary { background: var(--ink); border: 1px solid var(--ink); color: var(--bg); }
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(20,20,15,0.2); }
+.btn-primary:disabled { opacity: 0.5; cursor: wait; }
+
+/* Footer */
+.foot { padding-top: 3rem; padding-bottom: 3rem; border-top: 1px solid var(--rule); }
+.foot-mark { font-size: 2rem; margin-bottom: 2rem; line-height: 1; }
+.foot-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 3rem; margin-bottom: 3rem;
+}
+.foot-cols h4 { font-family: 'Boldonse', serif; font-size: 1rem; font-weight: 400; margin: 0 0 0.7rem; }
+.foot-cols p { font-size: 0.92rem; color: var(--ink-soft); margin: 0; max-width: 360px; }
+.foot-bottom { font-family: 'Boldonse', serif; font-size: 0.85rem; color: var(--muted); }
+
+@media (max-width: 720px) {
+  .ledger { padding: 2rem 1.25rem 0; }
+  .masthead { margin-bottom: 3rem; padding-top: 1rem; }
+  .brand { margin-bottom: 3.5rem; }
+  .row {
+    grid-template-columns: 72px 1fr;
+    gap: 1.25rem; padding: 1.5rem 0.75rem;
+  }
+  .row-spark, .row-arrow { display: none; }
+  .row-grade { font-size: 2.1rem; min-width: 60px; padding: 0.3rem 0.4rem; }
+  .row-name { font-size: 1.35rem; }
+  .modal { padding: 1.75rem; }
+  .detail-head { flex-direction: column; gap: 1rem; }
+  .detail-grade { font-size: 3rem; align-self: flex-start; }
+  .metric-row { grid-template-columns: 1fr auto; gap: 0.5rem; }
+  .metric-row-bar { grid-column: 1 / -1; }
+}
+</style>
+</head>
+<body>
+<div id="root" class="ledger"></div>
+
+<!-- ============================================================
+     FIREBASE CONFIG
+     To enable real community reviews shared across all visitors:
+     1. Go to https://console.firebase.google.com/
+     2. Create a new project (free, no card required)
+     3. Add a web app, copy the firebaseConfig values
+     4. In the Firebase console: Build > Firestore Database > Create database
+        (start in TEST MODE for now — change rules later)
+     5. Paste your config values below
+     6. Commit and push. Done.
+
+     If you leave this empty, the site will use localStorage instead
+     (reviews persist only in the current browser).
+============================================================ -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp }
+  from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "",            // <-- paste from Firebase console
+  authDomain: "",        // <-- paste from Firebase console
+  projectId: "",         // <-- paste from Firebase console
+  storageBucket: "",     // <-- paste from Firebase console
+  messagingSenderId: "", // <-- paste from Firebase console
+  appId: ""              // <-- paste from Firebase console
+};
+
+window.__firebase = null;
+if (firebaseConfig.apiKey) {
+  try {
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    window.__firebase = { db, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp };
+  } catch (e) {
+    console.error("Firebase init failed", e);
+  }
+}
+
+// Tell the app to boot once firebase status is decided
+window.dispatchEvent(new Event("firebase-ready"));
+</script>
+
+<script>
+// ============================================================
+// DATA
+// ============================================================
+const METRICS = [
+  { id: "plastics", label: "Single-use plastics", help: "Straws, cutlery, lids, bags" },
+  { id: "paper", label: "Napkins and paper", help: "Cloth alternatives, recycled stock" },
+  { id: "togo", label: "To-go containers", help: "Compostable vs plastic vs styrofoam" },
+  { id: "sourcing", label: "Sourcing", help: "Local, seasonal, transparent supply" },
+  { id: "waste", label: "Food waste", help: "Composting, donation programs" },
+  { id: "energy", label: "Energy and water", help: "Visible conservation practices" },
+  { id: "honesty", label: "Menu honesty", help: "Reflects actual stock, no over-prep" },
+];
+
+const NEIGHBORHOODS = ["All", "Mission", "Hayes Valley", "North Beach", "Oakland", "Berkeley", "Palo Alto", "Sausalito"];
+
+const SEED = [
+  { id: "r1", name: "Greens", cuisine: "Vegetarian", neighborhood: "Sausalito", address: "Fort Mason, Bldg A", blurb: "Pioneer of California vegetarian cooking, view of the bay.",
+    ratings: [
+      { plastics: 5, paper: 5, togo: 4, sourcing: 5, waste: 5, energy: 4, honesty: 5, note: "Cloth napkins, glass straws, they walked me through their compost setup.", user: "marisol_k", date: "2026-05-12" },
+      { plastics: 5, paper: 4, togo: 4, sourcing: 5, waste: 5, energy: 4, honesty: 5, note: "Menu changes daily based on the farm delivery. Real deal.", user: "j.thornton", date: "2026-04-30" },
+    ]},
+  { id: "r2", name: "Tartine Manufactory", cuisine: "Bakery", neighborhood: "Mission", address: "595 Alabama St", blurb: "Bread-first cafe and bakery in the Heath complex.",
+    ratings: [
+      { plastics: 3, paper: 3, togo: 2, sourcing: 4, waste: 3, energy: 3, honesty: 4, note: "Beautiful food but the to-go situation is rough. Plastic lids on everything.", user: "dieter.w", date: "2026-05-18" },
+      { plastics: 3, paper: 4, togo: 2, sourcing: 5, waste: 4, energy: 3, honesty: 4, note: "Sourcing is clearly excellent, packaging needs work.", user: "amelie.r", date: "2026-05-02" },
+    ]},
+  { id: "r3", name: "Chez Panisse", cuisine: "California", neighborhood: "Berkeley", address: "1517 Shattuck Ave", blurb: "The original. Alice Waters. Set menu, farm relationships forty years deep.",
+    ratings: [
+      { plastics: 5, paper: 5, togo: 5, sourcing: 5, waste: 5, energy: 4, honesty: 5, note: "There is no version of this restaurant that isn't the gold standard.", user: "p.huang", date: "2026-05-20" },
+      { plastics: 5, paper: 5, togo: 5, sourcing: 5, waste: 5, energy: 5, honesty: 5, note: "Asked about food waste. They donate, compost, the works.", user: "rk_dasgupta", date: "2026-03-11" },
+    ]},
+  { id: "r4", name: "Souvla", cuisine: "Greek", neighborhood: "Hayes Valley", address: "517 Hayes St", blurb: "Fast-casual rotisserie. Always a line.",
+    ratings: [
+      { plastics: 2, paper: 2, togo: 1, sourcing: 3, waste: 2, energy: 3, honesty: 3, note: "Everything to-go is plastic. Fine for dine-in, bad if you are taking it.", user: "claire.m", date: "2026-05-15" },
+      { plastics: 3, paper: 3, togo: 2, sourcing: 4, waste: 3, energy: 3, honesty: 3, note: "Lamb sourcing is local but the packaging undoes a lot of the good work.", user: "n.okafor", date: "2026-04-22" },
+    ]},
+  { id: "r5", name: "Shuggie's Trash Pie", cuisine: "Pizza", neighborhood: "Mission", address: "3349 23rd St", blurb: "Pizza built on upcycled ingredients. Their whole thing is waste.",
+    ratings: [
+      { plastics: 5, paper: 4, togo: 4, sourcing: 5, waste: 5, energy: 4, honesty: 5, note: "Entire menu is built on rescued ingredients. Walks the walk.", user: "marisol_k", date: "2026-05-19" },
+      { plastics: 4, paper: 5, togo: 4, sourcing: 5, waste: 5, energy: 4, honesty: 5, note: "They tell you exactly what would have been thrown out. Refreshing.", user: "j.thornton", date: "2026-05-05" },
+    ]},
+  { id: "r6", name: "Tony's Pizza Napoletana", cuisine: "Pizza", neighborhood: "North Beach", address: "1570 Stockton St", blurb: "World-champion pizzaiolo, multiple oven types.",
+    ratings: [
+      { plastics: 3, paper: 3, togo: 3, sourcing: 3, waste: 3, energy: 2, honesty: 4, note: "Energy use must be wild with all those ovens. Otherwise fine.", user: "dieter.w", date: "2026-04-28" },
+    ]},
+  { id: "r7", name: "Wahpepah's Kitchen", cuisine: "Indigenous", neighborhood: "Oakland", address: "3301 E 12th St", blurb: "Indigenous foodways, deeply sourced.",
+    ratings: [
+      { plastics: 5, paper: 5, togo: 4, sourcing: 5, waste: 5, energy: 4, honesty: 5, note: "Sourcing philosophy is the whole restaurant. Truly extraordinary.", user: "rk_dasgupta", date: "2026-05-10" },
+      { plastics: 4, paper: 5, togo: 4, sourcing: 5, waste: 5, energy: 4, honesty: 5, note: "Compostable to-go and they were happy to refill my container.", user: "p.huang", date: "2026-04-15" },
+    ]},
+  { id: "r8", name: "Philz Coffee", cuisine: "Cafe", neighborhood: "Palo Alto", address: "101 Forest Ave", blurb: "Pour-over chain, founded in the Mission.",
+    ratings: [
+      { plastics: 2, paper: 2, togo: 2, sourcing: 3, waste: 2, energy: 3, honesty: 3, note: "Plastic cups everywhere even for sit-down. They could do better.", user: "claire.m", date: "2026-05-08" },
+      { plastics: 2, paper: 3, togo: 2, sourcing: 3, waste: 2, energy: 3, honesty: 2, note: "Bring your own cup, basically. Otherwise it is a disposables fest.", user: "amelie.r", date: "2026-04-20" },
+    ]},
+  { id: "r9", name: "Cala", cuisine: "Mexican", neighborhood: "Hayes Valley", address: "149 Fell St", blurb: "Coastal Mexican from Gabriela Camara.",
+    ratings: [
+      { plastics: 4, paper: 4, togo: 4, sourcing: 5, waste: 4, energy: 4, honesty: 5, note: "Fish sourcing is transparent and seasonal. Menu shifts honestly.", user: "n.okafor", date: "2026-05-17" },
+    ]},
+  { id: "r10", name: "Mensho Tokyo", cuisine: "Ramen", neighborhood: "Mission", address: "672 Geary St", blurb: "Tonkotsu and lamb ramen with a perpetual line.",
+    ratings: [
+      { plastics: 4, paper: 3, togo: 3, sourcing: 3, waste: 4, energy: 3, honesty: 4, note: "Dine-in is solid. To-go containers are plastic but at least recyclable.", user: "dieter.w", date: "2026-05-03" },
+    ]},
+  { id: "r11", name: "Liholiho Yacht Club", cuisine: "Hawaiian", neighborhood: "Hayes Valley", address: "871 Sutter St", blurb: "Modern Hawaiian-inspired small plates.",
+    ratings: [
+      { plastics: 4, paper: 4, togo: 3, sourcing: 4, waste: 4, energy: 3, honesty: 4, note: "Servers know exactly where things come from when asked.", user: "marisol_k", date: "2026-05-11" },
+    ]},
+  { id: "r12", name: "Burma Superstar", cuisine: "Burmese", neighborhood: "Oakland", address: "4721 Telegraph Ave", blurb: "Beloved tea-leaf salad spot.",
+    ratings: [
+      { plastics: 3, paper: 3, togo: 2, sourcing: 3, waste: 3, energy: 3, honesty: 3, note: "Honest, no-frills sustainability. Could push on to-go packaging.", user: "j.thornton", date: "2026-05-09" },
+    ]},
+];
+
+// ============================================================
+// SCORING
+// ============================================================
+function avgScore(ratings) {
+  if (!ratings || ratings.length === 0) return null;
+  const totals = METRICS.map((m) => {
+    const vals = ratings.map((r) => r[m.id]).filter((v) => typeof v === "number");
+    if (vals.length === 0) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  });
+  const valid = totals.filter((t) => t !== null);
+  if (valid.length === 0) return null;
+  const overall = valid.reduce((a, b) => a + b, 0) / valid.length;
+  const perMetric = {};
+  METRICS.forEach((m, i) => perMetric[m.id] = totals[i]);
+  return { overall, perMetric };
+}
+
+function scoreToGrade(score) {
+  if (score === null || score === undefined) return "—";
+  if (score >= 4.6) return "A+";
+  if (score >= 4.2) return "A";
+  if (score >= 3.8) return "A−";
+  if (score >= 3.4) return "B+";
+  if (score >= 3.0) return "B";
+  if (score >= 2.6) return "B−";
+  if (score >= 2.2) return "C";
+  if (score >= 1.8) return "D";
+  return "F";
+}
+
+function gradeClass(grade) {
+  if (grade === "—") return "g-na";
+  if (grade.startsWith("A")) return "g-a";
+  if (grade.startsWith("B")) return "g-b";
+  if (grade.startsWith("C")) return "g-c";
+  return "g-f";
+}
+
+// ============================================================
+// STORAGE LAYER — Firebase if configured, localStorage fallback
+// ============================================================
+const STORAGE_KEY = "ledger_user_ratings_v1";
+
+const storage = {
+  mode: "loading",  // "firebase" | "local" | "loading"
+  cache: {},        // { restaurantId: [rating, ...] }
+  subscribers: [],
+
+  subscribe(fn) {
+    this.subscribers.push(fn);
+    return () => { this.subscribers = this.subscribers.filter(s => s !== fn); };
+  },
+
+  notify() {
+    this.subscribers.forEach(fn => fn(this.cache));
+  },
+
+  async init() {
+    if (window.__firebase) {
+      this.mode = "firebase";
+      const { db, collection, onSnapshot, query, orderBy } = window.__firebase;
+      const q = query(collection(db, "reviews"), orderBy("createdAt", "asc"));
+      onSnapshot(q, (snapshot) => {
+        const next = {};
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          const rid = data.restaurantId;
+          if (!next[rid]) next[rid] = [];
+          next[rid].push(data);
+        });
+        this.cache = next;
+        this.notify();
+      }, (err) => {
+        console.error("Firestore listener error", err);
+        this.mode = "local";
+        this.loadLocal();
+        this.notify();
+      });
+    } else {
+      this.mode = "local";
+      this.loadLocal();
+      this.notify();
+    }
+  },
+
+  loadLocal() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      this.cache = raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      this.cache = {};
+    }
+  },
+
+  async addReview(restaurantId, rating) {
+    if (this.mode === "firebase") {
+      const { db, collection, addDoc, serverTimestamp } = window.__firebase;
+      try {
+        await addDoc(collection(db, "reviews"), {
+          restaurantId,
+          ...rating,
+          createdAt: serverTimestamp(),
+        });
+      } catch (e) {
+        console.error("Firestore write failed", e);
+        throw e;
+      }
+    } else {
+      if (!this.cache[restaurantId]) this.cache[restaurantId] = [];
+      this.cache[restaurantId].push(rating);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.cache));
+      } catch (e) {
+        console.error("localStorage write failed", e);
+      }
+      this.notify();
+    }
+  },
+};
+
+// ============================================================
+// APP STATE
+// ============================================================
+const state = {
+  query: "",
+  neighborhood: "All",
+  selected: null,   // restaurant being viewed in detail
+  rating: null,     // restaurant being rated
+  userRatings: {},  // from storage layer
+};
+
+function setState(patch) {
+  Object.assign(state, patch);
+  render();
+}
+
+storage.subscribe((userRatings) => {
+  state.userRatings = userRatings;
+  render();
+});
+
+// ============================================================
+// ICONS (inline SVG, no lucide dependency)
+// ============================================================
+const Icons = {
+  search: () => `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`,
+  x: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+  plus: () => `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`,
+  arrow: () => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>`,
+};
+
+// ============================================================
+// HTML helpers
+// ============================================================
+function escapeHtml(s) {
+  if (s == null) return "";
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function getMerged() {
+  return SEED.map(r => ({
+    ...r,
+    ratings: [...r.ratings, ...(state.userRatings[r.id] || [])],
+  }));
+}
+
+function getFiltered() {
+  return getMerged()
+    .filter(r => state.neighborhood === "All" ? true : r.neighborhood === state.neighborhood)
+    .filter(r => state.query.trim() === "" ? true :
+      (r.name + r.cuisine + r.neighborhood).toLowerCase().includes(state.query.toLowerCase()))
+    .map(r => ({ ...r, score: avgScore(r.ratings) }))
+    .sort((a, b) => (b.score?.overall ?? -1) - (a.score?.overall ?? -1));
+}
+
+function renderSpark(perMetric, grade) {
+  if (!perMetric) return "";
+  return `<div class="spark ${gradeClass(grade)}">` +
+    METRICS.map(m => {
+      const v = perMetric[m.id];
+      const pct = v ? (v / 5) * 100 : 8;
+      return `<div class="spark-bar" title="${escapeHtml(m.label)}: ${v ? v.toFixed(1) : "—"}"><div class="spark-fill" style="height: ${pct}%"></div></div>`;
+    }).join("") + "</div>";
+}
+
+function renderRow(r, i) {
+  const grade = scoreToGrade(r.score?.overall);
+  const count = r.ratings.length;
+  return `<article class="row" data-restaurant="${r.id}" style="animation-delay: ${i * 35}ms">
+    <div class="row-grade ${gradeClass(grade)}">${grade}</div>
+    <div class="row-body">
+      <h2 class="row-name">${escapeHtml(r.name)}</h2>
+      <p class="row-meta">${escapeHtml(r.cuisine)} · ${escapeHtml(r.neighborhood)}</p>
+      <p class="row-blurb">${escapeHtml(r.blurb)}</p>
+    </div>
+    <div class="row-spark">
+      ${renderSpark(r.score?.perMetric, grade)}
+      <span class="row-count">${count} ${count === 1 ? "review" : "reviews"}</span>
+    </div>
+    <button class="row-arrow" aria-label="Open">${Icons.arrow()}</button>
+  </article>`;
+}
+
+function renderStatusBanner() {
+  if (storage.mode === "loading") {
+    return `<div class="status-banner">Connecting…</div>`;
+  }
+  if (storage.mode === "firebase") {
+    return `<div class="status-banner live">● Live · reviews shared across all visitors</div>`;
+  }
+  return `<div class="status-banner">Local mode · reviews save only in this browser. Configure Firebase in <code>index.html</code> to enable community reviews.</div>`;
+}
+
+function render() {
+  const filtered = getFiltered();
+  const root = document.getElementById("root");
+
+  root.innerHTML = `
+    ${renderStatusBanner()}
+    <header class="masthead">
+      <div class="brand">Ledger</div>
+      <h1 class="hero">
+        We grade<br/>
+        <span class="hero-grade">A+</span> the<br/>
+        honest <span class="hero-strike">ones.</span>
+      </h1>
+      <p class="hero-sub">A public record of how restaurants handle the small things. Reviews from people who actually ate there. Bay Area, for now.</p>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <span class="search-icon">${Icons.search()}</span>
+        <input id="search-input" type="text" placeholder="Find a restaurant" value="${escapeHtml(state.query)}" />
+        ${state.query ? `<button class="clear" id="clear-search">${Icons.x()}</button>` : ""}
+      </div>
+      <div class="hood-row">
+        ${NEIGHBORHOODS.map(n => `<button class="hood ${state.neighborhood === n ? "hood-active" : ""}" data-hood="${escapeHtml(n)}">${escapeHtml(n)}</button>`).join("")}
+      </div>
+    </div>
+
+    <div class="count-line">
+      <span class="count-num">${String(filtered.length).padStart(2, "0")}</span>
+      <span class="count-word">${filtered.length === 1 ? "restaurant on record" : "restaurants on record"}</span>
+    </div>
+
+    <main class="list">
+      ${filtered.length === 0 ? `<div class="empty">Nothing matches.</div>` : filtered.map(renderRow).join("")}
+    </main>
+
+    <footer class="foot">
+      <div class="foot-mark">◐</div>
+      <div class="foot-cols">
+        <div>
+          <h4>How it works</h4>
+          <p>Seven metrics, scored 1 through 5 by people who actually ate there. Averaged into a single grade. No weighting, no paid placement.</p>
+        </div>
+        <div>
+          <h4>Why a ledger</h4>
+          <p>Restaurants love to claim sustainability. Most claims are not verifiable. This is a public record, kept honestly.</p>
+        </div>
+      </div>
+      <div class="foot-bottom">Ledger. Bay Area. 2026.</div>
+    </footer>
+  `;
+
+  // Wire events
+  const searchInput = document.getElementById("search-input");
+  if (searchInput) {
+    searchInput.addEventListener("input", (e) => {
+      state.query = e.target.value;
+      renderListOnly();
+    });
+  }
+  const clear = document.getElementById("clear-search");
+  if (clear) clear.addEventListener("click", () => setState({ query: "" }));
+
+  document.querySelectorAll(".hood").forEach(btn => {
+    btn.addEventListener("click", () => setState({ neighborhood: btn.dataset.hood }));
+  });
+
+  document.querySelectorAll(".row").forEach(row => {
+    row.addEventListener("click", () => {
+      const id = row.dataset.restaurant;
+      const r = getMerged().find(x => x.id === id);
+      openDetail(r);
+    });
+  });
+}
+
+// Avoid full re-render on every keystroke
+function renderListOnly() {
+  const filtered = getFiltered();
+  const list = document.querySelector(".list");
+  const countNum = document.querySelector(".count-num");
+  const countWord = document.querySelector(".count-word");
+  if (countNum) countNum.textContent = String(filtered.length).padStart(2, "0");
+  if (countWord) countWord.textContent = filtered.length === 1 ? "restaurant on record" : "restaurants on record";
+  if (!list) return;
+  list.innerHTML = filtered.length === 0
+    ? `<div class="empty">Nothing matches.</div>`
+    : filtered.map(renderRow).join("");
+  document.querySelectorAll(".row").forEach(row => {
+    row.addEventListener("click", () => {
+      const id = row.dataset.restaurant;
+      const r = getMerged().find(x => x.id === id);
+      openDetail(r);
+    });
+  });
+}
+
+// ============================================================
+// DETAIL MODAL
+// ============================================================
+function openDetail(restaurant) {
+  const score = avgScore(restaurant.ratings);
+  const grade = scoreToGrade(score?.overall);
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal" onclick="event.stopPropagation()">
+      <button class="modal-close" data-action="close">${Icons.x(18)}</button>
+      <div class="detail-head">
+        <div class="detail-head-text">
+          <h2 class="detail-name">${escapeHtml(restaurant.name)}</h2>
+          <p class="detail-meta">${escapeHtml(restaurant.cuisine)} · ${escapeHtml(restaurant.neighborhood)} · ${escapeHtml(restaurant.address)}</p>
+          <p class="detail-blurb">${escapeHtml(restaurant.blurb)}</p>
+        </div>
+        <div class="detail-grade ${gradeClass(grade)}">${grade}</div>
+      </div>
+      <div class="metric-table">
+        ${METRICS.map(m => {
+          const v = score?.perMetric?.[m.id];
+          const g = scoreToGrade(v);
+          return `<div class="metric-row">
+            <div class="metric-row-text">
+              <span class="metric-row-name">${escapeHtml(m.label)}</span>
+              <span class="metric-row-help">${escapeHtml(m.help)}</span>
+            </div>
+            <div class="metric-row-bar">
+              <div class="metric-row-fill ${gradeClass(g)}" style="width: ${v ? (v / 5) * 100 : 0}%"></div>
+            </div>
+            <div class="metric-row-grade ${gradeClass(g)}">${g}</div>
+          </div>`;
+        }).join("")}
+      </div>
+      <div class="reviews-section">
+        <div class="reviews-head">
+          <h3>${restaurant.ratings.length} ${restaurant.ratings.length === 1 ? "review" : "reviews"}</h3>
+          <button class="btn-primary" data-action="add-review">${Icons.plus()} Add yours</button>
+        </div>
+        <ul class="reviews">
+          ${restaurant.ratings.slice().reverse().map(r => {
+            const sum = METRICS.map(m => r[m.id]).filter(v => typeof v === "number");
+            const avg = sum.reduce((a,b)=>a+b,0) / (sum.length || 1);
+            const g = scoreToGrade(avg);
+            return `<li class="review">
+              <div class="review-head">
+                <span class="review-user">@${escapeHtml(r.user || "anonymous")}</span>
+                <span class="review-sep">·</span>
+                <span class="review-date">${escapeHtml(r.date || "—")}</span>
+                <span class="review-grade ${gradeClass(g)}">${g}</span>
+              </div>
+              ${r.note ? `<p class="review-note">${escapeHtml(r.note)}</p>` : ""}
+            </li>`;
+          }).join("")}
+        </ul>
+      </div>
+    </div>
+  `;
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
+  overlay.querySelector('[data-action="close"]').addEventListener("click", closeModal);
+  overlay.querySelector('[data-action="add-review"]').addEventListener("click", () => {
+    closeModal();
+    openRate(restaurant);
+  });
+  document.body.appendChild(overlay);
+}
+
+function closeModal() {
+  document.querySelectorAll(".modal-overlay").forEach(o => o.remove());
+}
+
+// ============================================================
+// RATE MODAL
+// ============================================================
+function openRate(restaurant) {
+  const values = Object.fromEntries(METRICS.map(m => [m.id, 3]));
+  let note = "";
+  let user = "";
+  let submitting = false;
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  function html() {
+    return `
+    <div class="modal" onclick="event.stopPropagation()">
+      <button class="modal-close" data-action="close">${Icons.x(18)}</button>
+      <h2 class="detail-name" style="margin-bottom: 0">Review ${escapeHtml(restaurant.name)}</h2>
+      <p class="detail-meta" style="margin-bottom: 2rem">1 is poor, 5 is exemplary.</p>
+      <div class="rate-grid">
+        ${METRICS.map(m => `
+          <div class="rate-row">
+            <div class="rate-label">
+              <span>${escapeHtml(m.label)}</span>
+              <span class="metric-row-help">${escapeHtml(m.help)}</span>
+            </div>
+            <div class="rate-buttons" data-metric="${m.id}">
+              ${[1,2,3,4,5].map(n => `<button class="rate-btn ${values[m.id] === n ? "rate-btn-active" : ""}" data-value="${n}">${n}</button>`).join("")}
+            </div>
+          </div>`).join("")}
+      </div>
+      <div class="field">
+        <input id="rate-user" type="text" placeholder="Your handle (optional)" value="${escapeHtml(user)}" />
+      </div>
+      <div class="field">
+        <textarea id="rate-note" rows="3" placeholder="What did you actually observe?">${escapeHtml(note)}</textarea>
+      </div>
+      <div class="rate-foot">
+        <button class="btn-ghost" data-action="close">Cancel</button>
+        <button class="btn-primary" data-action="submit" ${submitting ? "disabled" : ""}>${submitting ? "Filing..." : "File review"}</button>
+      </div>
+    </div>`;
+  }
+  function rerender() { overlay.innerHTML = html(); wire(); }
+  function wire() {
+    overlay.querySelectorAll('[data-action="close"]').forEach(b => b.addEventListener("click", closeModal));
+    overlay.querySelectorAll(".rate-buttons").forEach(group => {
+      const metricId = group.dataset.metric;
+      group.querySelectorAll(".rate-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          values[metricId] = parseInt(btn.dataset.value, 10);
+          rerender();
+        });
+      });
+    });
+    const userInput = overlay.querySelector("#rate-user");
+    const noteInput = overlay.querySelector("#rate-note");
+    if (userInput) userInput.addEventListener("input", e => { user = e.target.value; });
+    if (noteInput) noteInput.addEventListener("input", e => { note = e.target.value; });
+
+    overlay.querySelector('[data-action="submit"]').addEventListener("click", async () => {
+      if (submitting) return;
+      submitting = true;
+      rerender();
+      try {
+        await storage.addReview(restaurant.id, {
+          ...values,
+          note: note.trim(),
+          user: user.trim() || "anonymous",
+          date: new Date().toISOString().slice(0, 10),
+        });
+        closeModal();
+      } catch (e) {
+        submitting = false;
+        alert("Could not save your review. Please try again.");
+        rerender();
+      }
+    });
+  }
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
+  rerender();
+  document.body.appendChild(overlay);
+}
+
+// ============================================================
+// BOOT
+// ============================================================
+function boot() {
+  storage.init();
+  render();
+}
+
+// Wait briefly for firebase init script to run (it's a module, slightly async)
+if (window.__firebase !== undefined) {
+  boot();
+} else {
+  window.addEventListener("firebase-ready", boot, { once: true });
+  // Fallback in case the firebase-ready event never fires
+  setTimeout(() => { if (storage.mode === "loading") boot(); }, 500);
+}
+</script>
+</body>
+</html>
